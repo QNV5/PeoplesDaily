@@ -96,13 +96,14 @@ class Page:
 
 
 class TodayPeopleDaily:
-    def __init__(self, logger: Logger, date: datetime.date = None):
+    def __init__(self, logger: Logger, date: datetime.date = None, save: os.path = None):
         if date is None:
             date = datetime.datetime.now(datetime.UTC) + TIME_DELTA
             date = date.date()
 
         self.logger = logger
         self.date = date
+        self.save = save
 
         self.year = str(date.year).zfill(4)
         self.month = str(date.month).zfill(2)
@@ -127,8 +128,11 @@ class TodayPeopleDaily:
         self.init()
 
     def init(self):
+        if self.save is not None:
+            self.dir_path = os.path.join(self.save, self.year, self.month, self.day)
+        else:
+            self.dir_path = os.path.join(DATA_DIR, self.year, self.month, self.day)
         # path
-        self.dir_path = os.path.join(DATA_DIR, self.year, self.month, self.day)
         self.pages_zip_name = f'{self.date_str}.zip'
         self.pages_zip_path = os.path.join(self.dir_path, self.pages_zip_name)
         self.merged_pdf_name = f'{self.date_str}.pdf'

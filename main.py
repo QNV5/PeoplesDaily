@@ -1,8 +1,11 @@
 import os
+import time
 import uuid
 import argparse
 import datetime
 import threading
+import random
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from func_timeout import func_timeout, FunctionTimedOut
 
@@ -133,10 +136,14 @@ def build_arg_parser():
         default=False,
         help="With attachment",
     )
+    parser.add_argument(
+        "--save-path",
+        help="The directory where it is saved",
+    )
     return parser
 
 
-def read_config_from_args(args) -> tuple[OSSConfig, EmailConfig]:
+def read_config_from_args(args) -> tuple[OSSConfig, EmailConfig, os.path]:
     # oss config
     oss_config = OSSConfig(
         args.oss_enabled,
@@ -163,10 +170,13 @@ def read_config_from_args(args) -> tuple[OSSConfig, EmailConfig]:
     )
 
     # return
-    return oss_config, email_config
+    if args.save_path is not None:
+        return oss_config, email_config, path_processing(args.save_path)
+
+    return oss_config, email_config, None
 
 
-def read_config_from_env() -> tuple[OSSConfig, EmailConfig]:
+def read_config_from_env() -> tuple[OSSConfig, EmailConfig, os.path]:
     def get_bool_env(key: str) -> bool:
         return os.environ.get(key, 'False').lower() == 'true'
 
@@ -216,8 +226,11 @@ def read_config_from_env() -> tuple[OSSConfig, EmailConfig]:
         email_with_attachment,
     )
 
+    save_path = os.environ.get('SAVE_PATH', None)
+    if save_path is not None:
+        return oss_config, email_config, path_processing(save_path)
     # return
-    return oss_config, email_config
+    return oss_config, email_config, None
 
 
 def log_config(oss_config: OSSConfig, email_config: EmailConfig):
@@ -241,6 +254,7 @@ def daily_task(
         oss_config: OSSConfig,
         email_config: EmailConfig,
         date: datetime.date = None,
+        path: os.path = None,
         retry: bool = False
 ) -> TodayPeopleDaily | None:
     # retry
@@ -259,7 +273,7 @@ def daily_task(
             raise e
 
     # init today peoples daily
-    today_peoples_daily = TodayPeopleDaily(logger, date)
+    today_peoples_daily = TodayPeopleDaily(logger, date, path)
 
     # main task
     try:
@@ -298,9 +312,9 @@ def daily_task(
         return retry_func()
 
 
-def main_once(args, oss_config: OSSConfig, email_config: EmailConfig):
+def main_once(args, oss_config: OSSConfig, email_config: EmailConfig, path: os.path):
     # run task
-    today_peoples_daily = daily_task(oss_config, email_config, args.date)
+    today_peoples_daily = daily_task(oss_config, email_config, args.date, path)
 
     # set output
     if args.write_github_output:
@@ -312,9 +326,10 @@ def main_once(args, oss_config: OSSConfig, email_config: EmailConfig):
                     print(f'{name}={value}', file=fh)
 
 
-def main_cron(oss_config: OSSConfig, email_config: EmailConfig):
+def main_cron(oss_config: OSSConfig, email_config: EmailConfig, save_path: os.path):
     # build scheduler
     scheduler = BackgroundScheduler(timezone=datetime.UTC)
+    path = save_path
 
     # Beijing time is UTC+8
     scheduler.add_job(
@@ -333,6 +348,7 @@ def main_cron(oss_config: OSSConfig, email_config: EmailConfig):
     logger.info(
         'Enter "exit" to exit, '
         '"get YYYY-MM-DD" to get People\'s Daily of the day'
+        '"time YYYY-MM-DD YYYY-MM-DD" to get newspapers within a specified time range'
     )
     while True:
         text = input()
@@ -345,7 +361,32 @@ def main_cron(oss_config: OSSConfig, email_config: EmailConfig):
                 logger.info(f'  - {thread.name}: {thread}')
         elif text.startswith('get '):
             date = datetime.date.fromisoformat(text[4:])
-            daily_task(oss_config, email_config, date)
+            daily_task(oss_config, email_config, date, save_path)
+        elif text.startswith('path '):
+            path = path_processing(text[5:])
+        elif text.startswith('save '):
+            logger.info(f'The file save path is {os.path.abspath(path)}')
+        elif text.startswith('time '):
+            start_date = datetime.date.fromisoformat(text[5:15])
+            end_date = datetime.date.fromisoformat(text[16:])
+            delta = end_date - start_date
+            days = delta.days
+            for day in range(days + 1):
+                query_time = start_date + datetime.timedelta(days=day)
+                daily_task(oss_config, email_config, query_time, path)
+                second = random.randint(10, 30)
+                time.sleep(second)
+
+
+def path_processing(path) -> os.path:
+    """
+    将路径转换为绝对路径
+    :param path: str 需要转换的路径
+    :return: os.path
+    """
+    if os.path.isabs(path):
+        return os.path.join(path)
+    return os.path.abspath(path)
 
 
 def main():
@@ -355,13 +396,13 @@ def main():
 
     # run
     if args.cron_enabled:
-        oss_config, email_config = read_config_from_env()
+        oss_config, email_config, save_path = read_config_from_env()
         log_config(oss_config, email_config)
-        main_cron(oss_config, email_config)
+        main_cron(oss_config, email_config, save_path)
     else:
-        oss_config, email_config = read_config_from_args(args)
+        oss_config, email_config, save_path = read_config_from_args(args)
         log_config(oss_config, email_config)
-        main_once(args, oss_config, email_config)
+        main_once(args, oss_config, email_config, save_path)
 
 
 if __name__ == '__main__':
