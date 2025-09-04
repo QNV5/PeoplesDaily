@@ -50,6 +50,9 @@ python main.py --cron-enabled
 - `exit` 退出程序
 - `threads` 查看当前所有线程
 - `get YYYY-MM-DD` 获取指定日期
+- `path .\path1\path2` 设置保存路径
+- `save` 获取设置的保存路径
+- `time YYYY-MM-DD YYYY-MM-DD` 获取指定范围内的报纸，第一个日期为起始日期，第二日期为结束日期，延时10~30秒
 
 ## Docker
 
